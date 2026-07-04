@@ -1,0 +1,52 @@
+name: Task
+description: A small, concrete unit of work — ready to hand to the autonomous-run mini
+title: "[Task]: "
+labels: ["mini-queue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep it **small and concrete** — one focused outcome (roughly a day or less).
+        Every acceptance criterion must be checkable by a command or test, so a human
+        *or* the mini can verify "done" objectively. A well-formed task *is* the spec.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One or two sentences — what should be true when this is done, and why it matters.
+      placeholder: 'e.g. Add a /health endpoint returning 200 + the build SHA, so uptime checks have a target.'
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (each test-verifiable)
+      description: A checklist. Every item must be provable by a command/test. Name the verify command explicitly.
+      value: |
+        - [ ]
+        - [ ]
+        - [ ] Verify with: `` (e.g. `pytest tests/test_x.py`, `curl -sf localhost:8000/health`)
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope & constraints
+      description: What's in and out of scope. Patterns to follow, files to touch, things NOT to change.
+      placeholder: 'In: … · Out: … · Follow the existing pattern in src/… · Do not change the public API.'
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Context & links
+      description: Anything that helps a human or Claude — related issues/PRs, docs, error messages, prior decisions.
+    validations:
+      required: false
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: Ready check
+      options:
+        - label: This is one focused outcome (split it if it's more than ~a day of work)
+        - label: Every acceptance criterion is verifiable by a command or test

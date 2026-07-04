@@ -1,0 +1,38 @@
+name: Bug
+description: Something is broken — report it so it can be reproduced and fixed
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Error / logs
+      description: Paste the exact error, stack trace, or command output.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: fix-verify
+    attributes:
+      label: How we'll know it's fixed
+      description: A command or test that fails now and passes once fixed.
+      placeholder: 'e.g. pytest tests/test_x.py::test_y passes'
+    validations:
+      required: true
