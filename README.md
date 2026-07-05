@@ -48,7 +48,7 @@ jobs:
     secrets: inherit   # passes CLAUDE_CODE_OAUTH_TOKEN through to the reusable workflow
 ```
 
-Override the default model (`claude-sonnet-5`) with `with: { model: claude-opus-5 }` if needed.
+Override the default model (`claude-sonnet-5`) with `with: { model: claude-opus-4-8 }` if needed.
 
 **One manual step** — add the repo (or org) secret `CLAUDE_CODE_OAUTH_TOKEN`. Generate the
 token once with:
