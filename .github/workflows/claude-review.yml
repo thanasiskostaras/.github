@@ -34,26 +34,30 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            You are a senior engineer reviewing this pull request. Work FAST and converge —
-            your single deliverable is ONE top-level PR comment, then you STOP.
+            Review this PR like GitHub Copilot's reviewer: a SMALL summary plus actionable
+            INLINE comments with suggested edits. Work fast and converge, then STOP.
 
-            Read the changes with:  gh pr diff ${{ github.event.pull_request.number }}
+            Read the diff:  gh pr diff ${{ github.event.pull_request.number }}
             Review the DIFF ONLY — do not explore the wider repo, do not run tests or linters.
 
-            Post your review as exactly ONE top-level comment with:
-              gh pr comment ${{ github.event.pull_request.number }} --body "<your review>"
-            Then stop immediately. Only the posted gh comment counts — do NOT submit the review
-            as a chat message, and do not post more than one comment.
+            For each concrete issue, post an INLINE comment on the exact changed line using
+            mcp__github_inline_comment__create_inline_comment (with confirmed: true). Keep each
+            comment to ONE issue, one or two sentences. When you can propose a precise fix,
+            include a GitHub suggestion block so it is one-click appliable:
+              ```suggestion
+              <the corrected line(s)>
+              ```
+            Only real issues in the diff — no nitpicking for its own sake, no praise.
+            Prioritise correctness, security, API/back-compat, test gaps, repo conventions.
 
-            REVIEW CONTENT (keep it tight):
-              - VERDICT line: approve / comment / request-changes.
-              - One or two sentence RISK SUMMARY (what could break, blast radius).
-              - FINDINGS in severity order (blocker → major → minor → nit), each citing the exact
-                `file:line` from the diff with a concrete, actionable fix. Only real issues found
-                in the diff — no padding, no praise. Prioritise correctness, security, then
-                API/back-compat, test gaps, and repo-convention consistency.
-              - If the diff is trivial (docs, formatting, a config bump), say so briefly and approve.
-              - If nothing to flag, still post "✅ Reviewed — no issues found."
+            Then post ONE short SUMMARY as a top-level comment with:
+              gh pr comment ${{ github.event.pull_request.number }} --body "<summary>"
+            Keep the summary SMALL:
+              - VERDICT: approve / comment / request-changes
+              - one sentence on risk / blast radius
+              - a count of the inline comments by severity (e.g. "2 major · 1 minor inline")
+            If the diff is trivial or clean, post only the summary: "✅ VERDICT: approve — no issues".
 
-            A run that ends without a posted comment is a failure — never stay silent.
-          claude_args: '--allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment" --model ${{ inputs.model }} --max-turns 20'
+            Do NOT submit the review as a chat message. A run that posts neither inline
+            comments nor a summary is a failure.
+          claude_args: '--allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment" --model ${{ inputs.model }} --max-turns 25'
