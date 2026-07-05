@@ -32,28 +32,25 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           use_sticky_comment: true
           prompt: |
-            You are a senior engineer reviewing this pull request. Be direct, specific, and useful.
+            You are a senior engineer reviewing this pull request. Work FAST and converge —
+            your single deliverable is ONE posted PR comment, then you STOP.
 
-            Open with a one-line VERDICT — one of: approve / comment / request-changes —
-            followed by a two-to-three sentence RISK SUMMARY (what could break, blast radius,
-            anything that must not merge as-is).
+            SCOPE — review the DIFF ONLY. Get the changes with:
+              git diff origin/${{ github.event.pull_request.base.ref }}...HEAD
+            You may open a changed file for local context, but do NOT explore the wider repo,
+            do NOT run tests, and do NOT run linters. Base the review on the diff hunks.
+            Post your comment as soon as you have enough to say — do not keep digging.
 
-            Then list FINDINGS in severity order (blocker first, then major, minor, nit).
-            Every finding must cite the exact `file:line` and give a concrete, actionable fix —
-            not just "consider improving". Group nothing; one finding per issue.
+            REVIEW CONTENT (keep it tight):
+              - VERDICT line: approve / comment / request-changes.
+              - One or two sentence RISK SUMMARY (what could break, blast radius).
+              - FINDINGS in severity order (blocker → major → minor → nit), each citing the exact
+                `file:line` from the diff with a concrete, actionable fix. Only real issues found
+                in the diff — no padding, no praise. Prioritise correctness, security, then
+                API/back-compat, test gaps, and repo-convention consistency.
+              - If the diff is trivial (docs, formatting, a config bump), say so briefly and approve.
 
-            Cover, in this order of priority:
-              1. Correctness & logic — off-by-one, null/None, error handling, edge cases, races.
-              2. Security — injection, authz/authn, secret handling, unsafe deserialization, SSRF.
-              3. Performance — N+1 queries, needless allocations, blocking I/O on hot paths.
-              4. API & backward compatibility — breaking signature/schema/contract changes.
-              5. Test-coverage gaps — untested branches, missing regression tests for the fix.
-              6. Consistency — deviations from existing patterns, naming, and conventions in this repo.
-
-            If the diff is trivial (docs, formatting, a one-line config bump) say so briefly
-            and approve — do not manufacture findings. Do not praise; focus on what needs attention.
-
-            ALWAYS finish by posting exactly ONE top-level comment on this PR with your review.
-            Even when the diff is clean or trivial, still post a brief note like "✅ Reviewed — no issues found."
-            A run that ends without a posted comment is a failure — never stay silent.
-          claude_args: "--model ${{ inputs.model }} --max-turns 25"
+            FINISH: post exactly ONE top-level comment with your review, then stop immediately.
+            If you find nothing, still post "✅ Reviewed — no issues found." A run that ends
+            without a posted comment is a failure — never stay silent.
+          claude_args: "--model ${{ inputs.model }} --max-turns 20"
