@@ -22,5 +22,5 @@ Natural place to grow shared GitHub automation without touching each repo:
 - **Reusable workflows** — `.github/workflows/*.yml`, called from any repo via
   `uses: thanasiskostaras/.github/.github/workflows/<name>.yml@main` (e.g. a standard
   lint/test workflow, a labeler, stale-issue sweeps, auto-assign).
-- **Profile README** — add `profile/README.md` to render a landing page on my GitHub profile.
+- **Profile README** — [`profile/README.md`](profile/README.md) renders the landing page on my GitHub profile.
 - Other defaults: `FUNDING.yml`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`.
