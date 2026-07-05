@@ -1,0 +1,54 @@
+name: Claude PR review
+
+# Reusable senior-review workflow. Call it from any repo with:
+#   uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@main
+# Billed against the Max subscription (OAuth token), so $0 API spend.
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: Claude model to review with.
+        type: string
+        required: false
+        default: claude-sonnet-5
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            You are a senior engineer reviewing this pull request. Be direct, specific, and useful.
+
+            Open with a one-line VERDICT — one of: approve / comment / request-changes —
+            followed by a two-to-three sentence RISK SUMMARY (what could break, blast radius,
+            anything that must not merge as-is).
+
+            Then list FINDINGS in severity order (blocker first, then major, minor, nit).
+            Every finding must cite the exact `file:line` and give a concrete, actionable fix —
+            not just "consider improving". Group nothing; one finding per issue.
+
+            Cover, in this order of priority:
+              1. Correctness & logic — off-by-one, null/None, error handling, edge cases, races.
+              2. Security — injection, authz/authn, secret handling, unsafe deserialization, SSRF.
+              3. Performance — N+1 queries, needless allocations, blocking I/O on hot paths.
+              4. API & backward compatibility — breaking signature/schema/contract changes.
+              5. Test-coverage gaps — untested branches, missing regression tests for the fix.
+              6. Consistency — deviations from existing patterns, naming, and conventions in this repo.
+
+            If the diff is trivial (docs, formatting, a one-line config bump) say so briefly
+            and approve — do not manufacture findings. Do not praise; focus on what needs attention.
+          claude_args: "--model ${{ inputs.model }} --max-turns 6"

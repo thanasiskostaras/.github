@@ -24,3 +24,38 @@ Natural place to grow shared GitHub automation without touching each repo:
   lint/test workflow, a labeler, stale-issue sweeps, auto-assign).
 - **Profile README** — [`profile/README.md`](profile/README.md) renders the landing page on my GitHub profile.
 - Other defaults: `FUNDING.yml`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`.
+
+## Claude PR review (`claude-review.yml`)
+[`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml) is a reusable
+senior-review workflow: every PR gets an automated Claude review that leads with a verdict +
+risk summary, then severity-ordered findings citing `file:line`. It runs on my **Max
+subscription** via an OAuth token, so it costs **$0 in API spend**.
+
+**Adopt it in a repo** — drop this ~10-line caller at `.github/workflows/review.yml`:
+
+```yaml
+name: Review
+on:
+  pull_request:
+    types: [opened]
+jobs:
+  review:
+    uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    secrets: inherit   # passes CLAUDE_CODE_OAUTH_TOKEN through to the reusable workflow
+```
+
+Override the default model (`claude-sonnet-5`) with `with: { model: claude-opus-5 }` if needed.
+
+**One manual step** — add the repo (or org) secret `CLAUDE_CODE_OAUTH_TOKEN`. Generate the
+token once with:
+
+```bash
+claude setup-token
+```
+
+then paste it under **Settings → Secrets and variables → Actions → New repository secret**.
+`secrets: inherit` in the caller forwards it into the reusable workflow.
