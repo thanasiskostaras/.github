@@ -52,4 +52,8 @@ jobs:
 
             If the diff is trivial (docs, formatting, a one-line config bump) say so briefly
             and approve — do not manufacture findings. Do not praise; focus on what needs attention.
+
+            ALWAYS finish by posting exactly ONE top-level comment on this PR with your review.
+            Even when the diff is clean or trivial, still post a brief note like "✅ Reviewed — no issues found."
+            A run that ends without a posted comment is a failure — never stay silent.
           claude_args: "--model ${{ inputs.model }} --max-turns 6"
