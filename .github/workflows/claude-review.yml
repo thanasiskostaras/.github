@@ -34,29 +34,39 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Review this PR like GitHub Copilot's reviewer: a SMALL summary plus actionable
-            INLINE comments with suggested edits. Work fast and converge, then STOP.
+            You are the senior reviewer. Your overriding goal is a review that CONVERGES:
+            be EXHAUSTIVE in this ONE pass so the author fixes everything at once, and NEVER
+            re-raise settled points on later pushes. A loop that dribbles new nits over many
+            rounds is a failure of this job.
 
             Read the diff:  gh pr diff ${{ github.event.pull_request.number }}
             Review the DIFF ONLY — do not explore the wider repo, do not run tests or linters.
 
-            For each concrete issue, post an INLINE comment on the exact changed line using
-            mcp__github_inline_comment__create_inline_comment (with confirmed: true). Keep each
-            comment to ONE issue, one or two sentences. When you can propose a precise fix,
-            include a GitHub suggestion block so it is one-click appliable:
-              ```suggestion
-              <the corrected line(s)>
-              ```
-            Only real issues in the diff — no nitpicking for its own sake, no praise.
-            Prioritise correctness, security, API/back-compat, test gaps, repo conventions.
+            INCREMENTAL RE-REVIEW — do this first:
+              gh pr view ${{ github.event.pull_request.number }} --json reviews,comments,commits
+            If you (github-actions) have already reviewed this PR, review ONLY the commits
+            pushed since your last review and comment ONLY on those newly-changed lines. Do
+            NOT re-raise earlier findings, do NOT duplicate resolved threads, and do NOT
+            surface fresh Low/Medium nits on lines you already saw. On the FIRST review, cover
+            the whole diff exhaustively — hold nothing back for a later round.
 
-            Then post ONE short SUMMARY as a top-level comment with:
+            For every real issue, post an INLINE comment on the exact changed line with
+            mcp__github_inline_comment__create_inline_comment (confirmed: true). Begin each
+            comment with a BOLD SEVERITY tag — **[Critical]**, **[High]**, **[Medium]**, **[Low]**:
+              - Critical = correctness bug / data loss / security
+              - High     = likely bug / real behavior regression / API or back-compat break
+              - Medium   = maintainability / simplification / efficiency
+              - Low      = style / nit
+            One issue per comment, one or two sentences, with a ```suggestion``` block when you
+            can give a precise fix. Report EVERYTHING you find in this pass. No praise.
+
+            Then post ONE short SUMMARY as a top-level comment:
               gh pr comment ${{ github.event.pull_request.number }} --body "<summary>"
-            Keep the summary SMALL:
-              - VERDICT: approve / comment / request-changes
+              - VERDICT: request-changes ONLY if a Critical or High finding exists; otherwise
+                approve. Medium/Low are advisory and NEVER block the merge.
               - one sentence on risk / blast radius
-              - a count of the inline comments by severity (e.g. "2 major · 1 minor inline")
-            If the diff is trivial or clean, post only the summary: "✅ VERDICT: approve — no issues".
+              - counts by severity, e.g. "1 Critical · 2 High · 3 Medium · 1 Low"
+            If the (new) diff is clean, post only: "✅ VERDICT: approve — no blocking issues".
 
             Do NOT submit the review as a chat message. A run that posts neither inline
             comments nor a summary is a failure.
