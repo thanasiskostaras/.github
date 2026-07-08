@@ -1,0 +1,89 @@
+name: PR auto-label
+
+# Reusable PR labeler. Call it from any repo with:
+#   uses: thanasiskostaras/.github/.github/workflows/pr-label.yml@main
+# Applies four label families on every PR open/sync:
+#   • Type     — from the conventional-commit prefix in the PR title
+#   • Size     — size/XS…XL from total diff churn (additions + deletions)
+#   • Area     — from the changed file paths (generic, repo-agnostic globs)
+#   • Priority — inherited from a linked (closing) issue's All Work board Priority
+# Type/Size/Area use the default GITHUB_TOKEN. Priority-inherit needs a PAT with the
+# `project` scope in the secret PROJECT_TOKEN; the step is skipped cleanly if it's absent.
+# Labels must exist in the caller repo first — see scripts/setup-pr-labels.sh.
+on:
+  workflow_call:
+    secrets:
+      PROJECT_TOKEN:
+        required: false
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - name: Apply Type / Size / Area / Priority labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          labels=()
+
+          # --- Type: conventional-commit prefix → existing taxonomy label ---
+          type="$(printf '%s' "$TITLE" | sed -nE 's/^([a-zA-Z]+)(\([^)]*\))?!?:.*/\1/p' | tr '[:upper:]' '[:lower:]')"
+          case "$type" in
+            feat)                                   labels+=("enhancement");;
+            fix)                                    labels+=("bug");;
+            docs)                                   labels+=("documentation");;
+            refactor|chore|build|ci|perf|test|style) labels+=("maintenance");;
+          esac
+
+          # --- Size: total churn → size/* bucket ---
+          read -r add del < <(gh pr view "$PR" --repo "$REPO" --json additions,deletions \
+                                --jq '"\(.additions) \(.deletions)"')
+          churn=$(( add + del ))
+          if   [ "$churn" -lt 10 ];  then labels+=("size/XS")
+          elif [ "$churn" -lt 50 ];  then labels+=("size/S")
+          elif [ "$churn" -lt 200 ]; then labels+=("size/M")
+          elif [ "$churn" -lt 500 ]; then labels+=("size/L")
+          else                            labels+=("size/XL")
+          fi
+
+          # --- Area: changed paths → area labels (generic globs; unmatched repos just skip) ---
+          files="$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')"
+          match() { printf '%s\n' "$files" | grep -qiE "$1"; }
+          match '(^|/)docs/|\.md$'                                   && labels+=("documentation")
+          match '^\.github/'                                          && labels+=("ci")
+          match '(^|/)frontend/|\.(tsx?|jsx?|css|scss)$'             && labels+=("frontend")
+          match '(^|/)(backend|app|src)/|\.py$'                       && labels+=("backend")
+          match '\.tf$|[Dd]ockerfile|(^|/)(infra|terraform|launchd)/' && labels+=("infra")
+
+          # --- Priority: inherit from a linked closing issue's board Priority ---
+          if [ -n "${PROJECT_TOKEN:-}" ]; then
+            owner="${REPO%/*}"; name="${REPO#*/}"
+            issue="$(gh pr view "$PR" --repo "$REPO" --json closingIssuesReferences \
+                       --jq '.closingIssuesReferences[0].number // empty')"
+            if [ -n "$issue" ]; then
+              prio="$(GH_TOKEN="$PROJECT_TOKEN" gh api graphql -f query="
+                { repository(owner:\"$owner\", name:\"$name\") { issue(number:$issue) {
+                    projectItems(first:5) { nodes {
+                      fieldValueByName(name:\"Priority\") {
+                        ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } }" \
+                --jq '[.data.repository.issue.projectItems.nodes[].fieldValueByName.name // empty][0] // empty' 2>/dev/null || true)"
+              [ -n "$prio" ] && labels+=("priority:$(printf '%s' "$prio" | tr '[:upper:]' '[:lower:]')")
+            fi
+          fi
+
+          # --- de-dupe + apply (best-effort: a missing label in the repo is skipped, not fatal) ---
+          if [ "${#labels[@]}" -gt 0 ]; then
+            uniq="$(printf '%s\n' "${labels[@]}" | sort -u | paste -sd, -)"
+            echo "labels → $uniq"
+            gh pr edit "$PR" --repo "$REPO" --add-label "$uniq" \
+              || echo "::warning::some labels not applied — run setup-pr-labels.sh in $REPO"
+          fi
