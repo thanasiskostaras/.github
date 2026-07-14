@@ -3,14 +3,16 @@ name: PR auto-label
 # Reusable PR labeler. Call it from any repo with:
 #   uses: thanasiskostaras/.github/.github/workflows/pr-label.yml@b180f60d535694c745481799f0eea6e9aed7c11e # v1.0.0
 # Pin to a release SHA (not @main) — supply-chain hardening; bump via Dependabot.
-# Applies four label families on every PR open/sync:
+# Applies four label families on every PR open/sync, plus assigns the owner on open:
 #   • Type     — from the conventional-commit prefix in the PR title
 #   • Size     — size/XS…XL from total diff churn (additions + deletions)
 #   • Area     — from the changed file paths (generic, repo-agnostic globs)
 #   • Priority — inherited from a linked (closing) issue's All Work board Priority
+#   • Assignee — the repo owner, set once on PR open (so every PR shows in "assigned to me")
 # Type/Size/Area use the default GITHUB_TOKEN. Priority-inherit needs a PAT with the
 # `project` scope in the secret PROJECT_TOKEN; the step is skipped cleanly if it's absent.
 # Labels must exist in the caller repo first — see scripts/setup-pr-labels.sh.
+# Assign needs `issues: write` (assignees are an Issues-API resource); callers must grant it.
 on:
   workflow_call:
     secrets:
@@ -23,7 +25,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
+      issues: write   # assignees are set via the Issues API (see Assign step)
     steps:
       - name: Apply Type / Size / Area / Priority labels
         env:
@@ -88,3 +90,18 @@ jobs:
             gh pr edit "$PR" --repo "$REPO" --add-label "$uniq" \
               || echo "::warning::some labels not applied — run setup-pr-labels.sh in $REPO"
           fi
+
+      # Assign the repo owner on PR open only (idempotent; skipped on sync/reopen so a
+      # deliberate un-assign isn't undone). Best-effort: a failure never fails the PR.
+      - name: Assign PR to repo owner
+        if: github.event.action == 'opened'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "assignee → $OWNER"
+          gh pr edit "$PR" --repo "$REPO" --add-assignee "$OWNER" \
+            || echo "::warning::could not assign $OWNER (already assigned, or token lacks issues:write)"
