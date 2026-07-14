@@ -20,7 +20,8 @@ into the autonomous-run mini (`/mini run <issue#>` or Telegram `/run`), and PR c
 ## Also the home for account-wide automation
 Natural place to grow shared GitHub automation without touching each repo:
 - **Reusable workflows** — `.github/workflows/*.yml`, called from any repo via
-  `uses: thanasiskostaras/.github/.github/workflows/<name>.yml@main` (e.g. a standard
+  `uses: …/<name>.yml@<release-sha> # v1.0.0` — pin to a release SHA, not `@main`
+  (supply-chain hardening, dotfiles#72; Dependabot bumps it). E.g. a standard
   lint/test workflow, a labeler, stale-issue sweeps, auto-assign).
 - **Profile README** — [`profile/README.md`](profile/README.md) renders the landing page on my GitHub profile.
 - Other defaults: `FUNDING.yml`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`.
@@ -40,7 +41,7 @@ on:
     types: [opened]
 jobs:
   review:
-    uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@main
+    uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@b180f60d535694c745481799f0eea6e9aed7c11e # v1.0.0
     permissions:
       contents: read
       pull-requests: write
