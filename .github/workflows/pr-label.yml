@@ -1,7 +1,8 @@
 name: PR auto-label
 
 # Reusable PR labeler. Call it from any repo with:
-#   uses: thanasiskostaras/.github/.github/workflows/pr-label.yml@main
+#   uses: thanasiskostaras/.github/.github/workflows/pr-label.yml@b180f60d535694c745481799f0eea6e9aed7c11e # v1.0.0
+# Pin to a release SHA (not @main) — supply-chain hardening; bump via Dependabot.
 # Applies four label families on every PR open/sync:
 #   • Type     — from the conventional-commit prefix in the PR title
 #   • Size     — size/XS…XL from total diff churn (additions + deletions)

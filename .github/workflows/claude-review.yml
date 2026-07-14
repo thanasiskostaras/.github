@@ -1,7 +1,8 @@
 name: Claude PR review
 
 # Reusable senior-review workflow. Call it from any repo with:
-#   uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@main
+#   uses: thanasiskostaras/.github/.github/workflows/claude-review.yml@b180f60d535694c745481799f0eea6e9aed7c11e # v1.0.0
+# Pin to a release SHA (not @main) — supply-chain hardening; bump via Dependabot.
 # Billed against the Max subscription (OAuth token), so $0 API spend.
 on:
   workflow_call:
