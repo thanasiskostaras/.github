@@ -60,3 +60,32 @@ claude setup-token
 
 then paste it under **Settings → Secrets and variables → Actions → New repository secret**.
 `secrets: inherit` in the caller forwards it into the reusable workflow.
+
+## On-demand Claude (`claude-mention.yml`)
+The reviewer above runs **automatically on every PR**. GitHub does **not** let you
+request a bot from the native *Reviewers* panel, so to *summon* Claude yourself, comment
+**`@claude review this`** (or any `@claude …` question) on a PR — [`claude-mention.yml`](.github/workflows/claude-mention.yml)
+picks it up and responds in-thread, on the same **Max subscription** ($0 API).
+
+Add this caller at `.github/workflows/mention.yml`:
+
+```yaml
+name: Claude on-demand
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  mention:
+    uses: thanasiskostaras/.github/.github/workflows/claude-mention.yml@<release-sha> # vX.Y.Z
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+It only fires on **PR** comments that mention `@claude` **and** come from the repo owner —
+random visitors can't spend the subscription quota. Note: `issue_comment` workflows always
+run from the **default branch**, so `@claude` works once `mention.yml` is merged (it can't be
+tested from a PR branch).

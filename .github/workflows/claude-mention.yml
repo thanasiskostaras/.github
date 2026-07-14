@@ -1,0 +1,56 @@
+name: Claude on-demand (@claude)
+
+# Reusable on-demand Claude workflow. Call it from any repo with a caller that
+# triggers on issue_comment / PR review comments (see below). Lets you summon
+# Claude on a PR by commenting "@claude review this" (or any @claude question) —
+# the review-on-open workflow (claude-review.yml) still runs automatically; this
+# is the manual, assign-it-yourself companion.
+#   uses: thanasiskostaras/.github/.github/workflows/claude-mention.yml@<release-sha> # vX.Y.Z
+# Pin to a release SHA (not @main) — supply-chain hardening; bump via Dependabot.
+# Billed against the Max subscription (OAuth token), so $0 API spend.
+#
+# NOTE: issue_comment workflows always run from the DEFAULT branch, so the caller
+# must be merged to default before @claude works — it can't be exercised from a PR
+# branch the way the pull_request-triggered reviewer can.
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: Claude model to respond with.
+        type: string
+        required: false
+        default: claude-sonnet-5
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  respond:
+    # Fire ONLY when: the comment is on a pull request (not a plain issue), it
+    # mentions @claude, and the author is the repo owner. The owner gate stops
+    # anyone else from spending the Max-subscription quota.
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      github.event.comment.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Tag mode: claude-code-action detects the @claude mention in the triggering
+      # comment and responds in-thread (review, answer, or follow a request). No
+      # explicit prompt — the owner's comment IS the instruction. The action reads
+      # the comment via the event payload, so nothing untrusted is inlined here.
+      - name: Claude respond to @claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--model ${{ inputs.model }} --max-turns 30'
