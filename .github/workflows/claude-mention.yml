@@ -48,9 +48,18 @@ jobs:
       # comment and responds in-thread (review, answer, or follow a request). No
       # explicit prompt — the owner's comment IS the instruction. The action reads
       # the comment via the event payload, so nothing untrusted is inlined here.
+      #
+      # allowedTools: scope @claude to READ + PR/issue COMMENT only — no arbitrary
+      # Bash, no Write/Edit, no network. The job is owner-gated, so the residual
+      # risk is the owner being socially engineered into @claude-ing a malicious
+      # fork PR; bounding the toolset stops Claude from running attacker-supplied
+      # shell/exfil with the write-scoped token in env. Mirrors claude-review.yml.
+      # (To let @claude apply fixes later, add Write/Edit here behind the same gate.)
       - name: Claude respond to @claude
         uses: anthropics/claude-code-action@f1bd27ca5b54584506e40e17884d90bdaaa1a9b3 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          claude_args: '--model ${{ inputs.model }} --max-turns 30'
+          claude_args: >-
+            --model ${{ inputs.model }} --max-turns 30
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(git diff:*),Bash(git log:*),mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob"
