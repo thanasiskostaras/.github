@@ -12,6 +12,9 @@ on:
         type: string
         required: false
         default: claude-sonnet-5
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
 
 jobs:
   review:
