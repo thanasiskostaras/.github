@@ -26,6 +26,33 @@ Natural place to grow shared GitHub automation without touching each repo:
 - **Profile README** — [`profile/README.md`](profile/README.md) renders the landing page on my GitHub profile.
 - Other defaults: `FUNDING.yml`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`.
 
+## Label taxonomy (`labels.yml`)
+[`labels.yml`](labels.yml) is the **single source of truth** for labels across all my
+repos — five families: **type** (`enhancement`/`bug`/`documentation`/`maintenance`),
+**size** (`size/XS…XL`), **area** (`ci`/`frontend`/`backend`/`infra`), **priority**
+(`priority:critical…low`) and **status** (`status:todo`/`in-progress`/`blocked`/`needs-review`).
+[`pr-label.yml`](.github/workflows/pr-label.yml) sets type/size/area/priority on PRs
+automatically; status is for manual triage.
+
+Apply it to a repo:
+- **From your machine** — `./scripts/setup-pr-labels.sh <owner/repo>` (wraps
+  [`scripts/labels.py`](scripts/labels.py)).
+- **In CI** — [`label-sync.yml`](.github/workflows/label-sync.yml) self-syncs this repo on
+  every taxonomy change, and any repo can sync its own labels with a tiny caller:
+
+  ```yaml
+  name: Labels
+  on: { workflow_dispatch: {}, schedule: [{ cron: '17 6 * * 1' }] }
+  jobs:
+    sync:
+      permissions: { issues: write }
+      uses: thanasiskostaras/.github/.github/workflows/label-sync.yml@<release-sha> # vX.Y.Z
+  ```
+
+  The canonical file comes from this **public** repo, so callers need no PAT — sync runs on
+  their own `GITHUB_TOKEN`. It's additive & idempotent: labels are created or reconciled,
+  **never deleted**.
+
 ## Claude PR review (`claude-review.yml`)
 [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml) is a reusable
 senior-review workflow: every PR gets an automated Claude review that leads with a verdict +

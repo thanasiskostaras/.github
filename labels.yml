@@ -1,0 +1,93 @@
+# labels.yml — canonical label taxonomy for all thanasiskostaras repos.
+#
+# Single source of truth. Synced into a repo by scripts/labels.py — run locally
+#   (scripts/setup-pr-labels.sh <owner/repo>) or by the label-sync.yml workflow.
+# Sync is additive & idempotent: it creates a label, or updates its colour/description
+# if it already exists. It NEVER deletes labels, so GitHub defaults (question, help
+# wanted, …) and Dependabot's (dependencies, github_actions) are left untouched.
+#
+# Harmonised with the pr-label.yml auto-labeler, which sets most of these automatically:
+#   type     — from the PR-title conventional-commit prefix
+#              (feat→enhancement, fix→bug, docs→documentation, refactor|chore|ci|…→maintenance)
+#   size     — size/XS…XL from diff churn
+#   area     — from the changed file paths
+#   priority — inherited from the All Work board's Priority field (Critical/High/Medium/Low)
+#   status   — manual triage labels; net-new here. For issues the board's Status field is
+#              authoritative — these mirror it for PRs and for at-a-glance filtering.
+#
+# Format: a flat `labels:` list of {name, color, description}. `color` is a 6-hex-digit
+# string with no leading '#'. Keep it simple — scripts/labels.py parses this subset only.
+
+labels:
+  # ── Type ── (GitHub defaults kept as-is; only `maintenance` is custom)
+  - name: enhancement
+    color: a2eeef
+    description: New feature or request
+  - name: bug
+    color: d73a4a
+    description: Something isn't working
+  - name: documentation
+    color: 0075ca
+    description: Improvements or additions to documentation
+  - name: maintenance
+    color: ededed
+    description: refactor / chore / build / ci / perf / test / style
+
+  # ── Size ── (gradient light→heavy; set from diff churn)
+  - name: size/XS
+    color: c2e0c6
+    description: <10 lines changed
+  - name: size/S
+    color: 7fd38a
+    description: 10-49 lines changed
+  - name: size/M
+    color: fbca04
+    description: 50-199 lines changed
+  - name: size/L
+    color: d93f0b
+    description: 200-499 lines changed
+  - name: size/XL
+    color: b60205
+    description: 500+ lines changed
+
+  # ── Area ── (by layer; set from changed file paths)
+  - name: ci
+    color: 1d76db
+    description: CI / GitHub Actions changes
+  - name: frontend
+    color: 5319e7
+    description: Frontend / UI changes
+  - name: backend
+    color: 0e8a16
+    description: Backend / API / library changes
+  - name: infra
+    color: 006b75
+    description: Infrastructure / IaC / launchd changes
+
+  # ── Priority ── (mirrors the All Work board Priority field; inherited by pr-label.yml)
+  - name: priority:critical
+    color: b60205
+    description: 'Inherited from a linked issue: Critical'
+  - name: priority:high
+    color: d93f0b
+    description: 'Inherited from a linked issue: High'
+  - name: priority:medium
+    color: fbca04
+    description: 'Inherited from a linked issue: Medium'
+  - name: priority:low
+    color: 0075ca
+    description: 'Inherited from a linked issue: Low'
+
+  # ── Status ── (manual triage; board Status field is authoritative for issues)
+  - name: status:todo
+    color: ededed
+    description: Triaged and ready to pick up
+  - name: status:in-progress
+    color: fbca04
+    description: Actively being worked on
+  - name: status:blocked
+    color: b60205
+    description: Blocked on a dependency or decision
+  - name: status:needs-review
+    color: 0e8a16
+    description: Awaiting review or approval

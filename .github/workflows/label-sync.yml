@@ -1,0 +1,49 @@
+name: Label sync
+
+# Applies the canonical label taxonomy (../../labels.yml) to a repo.
+#
+# Three ways it runs:
+#   • push to main here  — self-syncs THIS (.github) repo whenever the taxonomy changes.
+#   • workflow_dispatch  — manual re-sync of this repo from the Actions tab.
+#   • workflow_call      — any repo can sync ITS OWN labels by adding a tiny caller:
+#
+#       # .github/workflows/labels.yml in the caller repo
+#       name: Labels
+#       on:
+#         workflow_dispatch:
+#         schedule: [{ cron: '17 6 * * 1' }]   # weekly drift-repair (optional)
+#       jobs:
+#         sync:
+#           permissions: { issues: write }
+#           uses: thanasiskostaras/.github/.github/workflows/label-sync.yml@main
+#
+#   Pin @main to a release SHA in real callers (supply-chain hardening, matches pr-label.yml).
+#
+# The canonical labels.yml + scripts/labels.py always come from the PUBLIC .github repo at
+# main, so callers need no PAT — sync uses the caller's own GITHUB_TOKEN (issues: write is
+# enough to manage its labels). Additive & idempotent: never deletes labels.
+on:
+  push:
+    branches: [main]
+    paths:
+      - labels.yml
+      - scripts/labels.py
+      - .github/workflows/label-sync.yml
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write   # create/edit labels in the running repo
+    steps:
+      - name: Fetch canonical taxonomy from .github
+        uses: actions/checkout@v4
+        with:
+          repository: thanasiskostaras/.github
+          ref: main
+      - name: Sync labels into ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/labels.py "${{ github.repository }}"
