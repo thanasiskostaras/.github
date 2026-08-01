@@ -39,7 +39,7 @@ jobs:
       issues: write   # create/edit labels in the running repo
     steps:
       - name: Fetch canonical taxonomy from .github
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: thanasiskostaras/.github
           ref: main
