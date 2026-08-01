@@ -28,11 +28,24 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # GitHub forces GITHUB_TOKEN to read-only for pull_request events from a
+      # FORK, regardless of the permissions: block above — so resolveReviewThread
+      # would fail. Skip loudly rather than fail silently. Supporting forks would
+      # need pull_request_target, which we deliberately avoid here: it runs with
+      # a writable token against untrusted head code.
+      - name: Skip on fork PRs (read-only token)
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::Fork PR — GITHUB_TOKEN is read-only, so threads cannot be resolved. Skipping."
+          exit 0
+
       - uses: actions/checkout@v7
+        if: github.event.pull_request.head.repo.full_name == github.repository
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Resolve threads whose suggestion is now present
+        if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.event.repository.owner.login }}
