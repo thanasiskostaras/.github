@@ -12,8 +12,11 @@ name: Security scan
 # Three independent jobs, so one failing does not mask the others:
 #   • secrets — gitleaks over FULL history, on every trigger. A secret committed and
 #               later removed is still in history and still compromised.
-#   • deps    — pip-audit / npm audit. Fails only on High+ WITH a fix available, so an
-#               unfixable advisory cannot block every PR indefinitely.
+#   • deps    — pip-audit / npm audit. Blocks only on findings that have a published
+#               fix, so an unfixable advisory cannot wedge every PR indefinitely —
+#               those are surfaced as warnings instead. npm additionally gates on
+#               High+ severity; pip-audit's JSON carries no severity field, so for
+#               Python the gate is fix-availability alone.
 #   • sast    — ruff's flake8-bandit (S) rules. Run via --select so no repo needs to
 #               change its own lint config.
 # Language detection is automatic from files present; a repo with neither Python nor Node
@@ -125,12 +128,46 @@ jobs:
           # PR forever. Reviewed on the scheduled run instead.
           rc=0; scanned=0
           slug() { printf '%s' "${1:-root}" | tr '/.' '--' | sed 's/^-*//; s/-*$//; s/^$/root/'; }
+          # Gate: block only on vulnerabilities that HAVE a published fix, so an
+          # unfixable advisory cannot wedge every PR (see header). pip-audit's JSON
+          # has no severity field, so fix-availability is the only gate here.
+          cat > "$RUNNER_TEMP/gate_pip.py" <<'GATE_PIP'
+          import json, sys
+          rep, proj, prc = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          try:
+              with open(rep) as fh:
+                  data = json.load(fh)
+          except (OSError, ValueError) as exc:
+              print(f"::error::{proj}: pip-audit produced no usable report ({exc})")
+              sys.exit(1)
+          vulns = [(d["name"], v) for d in data.get("dependencies", []) for v in d.get("vulns", [])]
+          fixable = [(n, v) for n, v in vulns if v.get("fix_versions")]
+          for n, v in vulns:
+              if not v.get("fix_versions"):
+                  print(f"::warning::{proj}: {n} {v['id']} — no fix published yet; not blocking")
+          for n, v in fixable:
+              print(f"::error::{proj}: {n} {v['id']} — fix available in {', '.join(v['fix_versions'])}")
+          if fixable:
+              sys.exit(1)
+          # Non-zero exit with nothing reported means --strict tripped on dependency
+          # collection: an incomplete audit must not pass as clean.
+          if prc != 0 and not vulns:
+              print(f"::error::{proj}: pip-audit exited {prc} with no findings — dependency collection failed")
+              sys.exit(1)
+          sys.exit(0)
+          GATE_PIP
+          # audit <report> <label> -- <pip-audit args...>
+          audit() {
+            local out="$1" label="$2"; shift 3
+            pip-audit --progress-spinner off --strict -f json -o "$out" "$@" 2>&1 | tail -30
+            python3 "$RUNNER_TEMP/gate_pip.py" "$out" "$label" "${PIPESTATUS[0]}" || rc=1
+          }
           for f in $(git ls-files -- '*pyproject.toml'); do
             d=$(dirname "$f"); scanned=$((scanned+1))
             echo "::group::pip-audit (project) $d"
             # Project path is POSITIONAL. -P/--path means "restrict to this
             # installation path" (for --local) and is rejected outright here.
-            pip-audit --progress-spinner off --strict -f json -o "pip-audit-$(slug "$d").json" "$d" 2>&1 | tail -30 || rc=1
+            audit "pip-audit-$(slug "$d").json" "$d" -- "$d"
             echo "::endgroup::"
           done
           # requirements*.txt counted as a Python signal in detect but matched no loop here,
@@ -138,7 +175,7 @@ jobs:
           for f in $(git ls-files -- '*requirements*.txt'); do
             scanned=$((scanned+1))
             echo "::group::pip-audit (requirements) $f"
-            pip-audit --progress-spinner off --strict -f json -o "pip-audit-$(slug "$f").json" -r "$f" 2>&1 | tail -30 || rc=1
+            audit "pip-audit-$(slug "$f").json" "$f" -- -r "$f"
             echo "::endgroup::"
           done
           # Structural guard: detection said Python is present, so having scanned nothing is
@@ -156,13 +193,39 @@ jobs:
           set -euo pipefail
           rc=0; scanned=0
           slug() { printf '%s' "${1:-root}" | tr '/.' '--' | sed 's/^-*//; s/-*$//; s/^$/root/'; }
+          # Same gate as pip-audit: block only where a fix exists. npm's JSON carries
+          # severity too, so the High+ half of the promise applies here as well.
+          cat > "$RUNNER_TEMP/gate_npm.py" <<'GATE_NPM'
+          import json, sys
+          rep, proj = sys.argv[1], sys.argv[2]
+          BLOCKING = {"high", "critical"}
+          try:
+              with open(rep) as fh:
+                  data = json.load(fh)
+          except (OSError, ValueError) as exc:
+              print(f"::error::{proj}: npm audit produced no usable report ({exc})")
+              sys.exit(1)
+          blocking = []
+          for name, v in (data.get("vulnerabilities") or {}).items():
+              sev = v.get("severity", "unknown")
+              # fixAvailable is false, true, or an object describing the upgrade.
+              fix = v.get("fixAvailable")
+              if sev in BLOCKING and fix:
+                  where = fix.get("version") if isinstance(fix, dict) else "an update"
+                  blocking.append(f"::error::{proj}: {name} ({sev}) — fix available in {where}")
+              elif sev in BLOCKING:
+                  print(f"::warning::{proj}: {name} ({sev}) — no fix available yet; not blocking")
+          for line in blocking:
+              print(line)
+          sys.exit(1 if blocking else 0)
+          GATE_NPM
           for f in $(git ls-files -- '*package-lock.json'); do
-            d=$(dirname "$f"); scanned=$((scanned+1))
+            d=$(dirname "$f"); scanned=$((scanned+1)); out="npm-audit-$(slug "$d").json"
             echo "::group::npm audit $d"
-            # Capture JSON for the artifact as well as the readable log; without this
-            # the failure artifact holds only pip-audit output even on an npm failure.
-            ( cd "$d" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit-$(slug "$d").json" || true )
-            ( cd "$d" && npm audit --audit-level=high ) || rc=1
+            # The JSON is both the gate input and the failure artifact. npm audit exits
+            # non-zero whenever it finds anything, so keep the report either way.
+            ( cd "$d" && npm audit --json > "$GITHUB_WORKSPACE/$out" || true )
+            python3 "$RUNNER_TEMP/gate_npm.py" "$out" "$d" || rc=1
             echo "::endgroup::"
           done
           # yarn.lock / pnpm-lock.yaml made a repo node=true but matched no loop, so it
