@@ -47,6 +47,15 @@ on:
         type: string
         default: "20"
         required: false
+    secrets:
+      repo_token:
+        description: >-
+          PAT with read access to any PRIVATE repo this project depends on via a
+          git+https requirement. pip-audit resolves the whole tree, so an
+          unauthenticated clone of one private dependency fails the entire audit.
+          The default GITHUB_TOKEN cannot be used: it is scoped to the calling
+          repository alone and has no access to a sibling private repo.
+        required: false
 
 permissions:
   contents: read
@@ -88,14 +97,28 @@ jobs:
           VER=8.28.0
           BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VER}"
           TARBALL="gitleaks_${VER}_linux_x64.tar.gz"
-          curl -sSfLO "$BASE/$TARBALL"
-          curl -sSfLO "$BASE/gitleaks_${VER}_checksums.txt"
+          # Retry the download. A transient curl failure here (observed: exit 22 on a
+          # release asset) fails the SECRETS job — the one job whose red must always
+          # mean "a credential leaked". Flaky infrastructure must not spend that signal.
+          fetch() {
+            for attempt in 1 2 3; do
+              curl -sSfLO --retry 3 --retry-all-errors --connect-timeout 10 "$1" && return 0
+              echo "::warning::download failed (attempt $attempt/3): $1"
+              sleep $((attempt * 5))
+            done
+            echo "::error::could not download $1 after 3 attempts"
+            return 1
+          }
+          fetch "$BASE/$TARBALL"
+          fetch "$BASE/gitleaks_${VER}_checksums.txt"
           # Verify BEFORE extracting or executing. This workflow preaches supply-chain
           # hardening (pinned caller SHAs); fetching and running an unverified third-party
           # binary with full repo access would contradict exactly that. Fails closed — if
           # the checksums file is absent or the digest differs, the step stops here.
           grep " ${TARBALL}\$" "gitleaks_${VER}_checksums.txt" | sha256sum -c -
           tar -xzf "$TARBALL" gitleaks
+          # The tarball happens to carry the exec bit today; do not depend on it.
+          chmod +x gitleaks
           ./gitleaks version
           # `detect` walks git history; `--redact` keeps the finding out of the public log.
           # Exit 1 = leaks found, 2 = tool error — both must fail, neither silently.
@@ -112,11 +135,25 @@ jobs:
   deps:
     needs: detect
     runs-on: ubuntu-latest
+    # Hoisted to job level deliberately: the `secrets` context is not available in a
+    # step-level `if:`, but `env` is, and `secrets` is available here.
+    env:
+      REPO_TOKEN: ${{ secrets.repo_token }}
     steps:
       - uses: actions/checkout@v4
       - if: needs.detect.outputs.python == 'true'
         uses: actions/setup-python@v5
         with: { python-version: "${{ inputs.python-version }}" }
+      - name: Authenticate git for private dependencies
+        # Only when the caller supplied a token. Without it the step is skipped and a
+        # private git dependency fails the audit loudly below, rather than being
+        # quietly dropped from the tree and reported green.
+        if: needs.detect.outputs.python == 'true' && env.REPO_TOKEN != ''
+        run: |
+          set -euo pipefail
+          # Rewrite rather than embed: the URL never appears in a manifest, a log line,
+          # or `git remote -v` output, so the token cannot leak into an artifact.
+          git config --global url."https://x-access-token:${REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: pip-audit
         if: needs.detect.outputs.python == 'true'
         run: |
@@ -159,8 +196,22 @@ jobs:
           # audit <report> <label> -- <pip-audit args...>
           audit() {
             local out="$1" label="$2"; shift 3
-            pip-audit --progress-spinner off --strict -f json -o "$out" "$@" 2>&1 | tail -30
-            python3 "$RUNNER_TEMP/gate_pip.py" "$out" "$label" "${PIPESTATUS[0]}" || rc=1
+            pip-audit --progress-spinner off --strict -f json -o "$out" "$@" 2>&1 \
+              | tee "$RUNNER_TEMP/audit.log" | tail -30
+            local prc="${PIPESTATUS[0]}"
+            # pip-audit surfaces an unauthenticated private clone as a raw pip traceback
+            # ("could not read Username for 'https://github.com'"), which reads like a
+            # tool bug. Name the actual cause and the actual fix.
+            if [ "$prc" -ne 0 ] && grep -q "could not read Username for" "$RUNNER_TEMP/audit.log"; then
+              if [ -n "${REPO_TOKEN:-}" ]; then
+                echo "::error::${label}: a private git dependency could not be cloned even with repo_token — check the token still has read access and has not expired"
+              else
+                echo "::error::${label}: depends on a PRIVATE repo over git+https and no repo_token was supplied, so the tree cannot be resolved. Add a PAT with read access to that repo as a repository secret, then pass it through from the caller as the reusable workflow secret named repo_token"
+              fi
+              rc=1
+              return
+            fi
+            python3 "$RUNNER_TEMP/gate_pip.py" "$out" "$label" "$prc" || rc=1
           }
           for f in $(git ls-files -- '*pyproject.toml'); do
             d=$(dirname "$f"); scanned=$((scanned+1))
@@ -259,13 +310,29 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet 'ruff==0.14.5'
+          # Databricks notebook sources are .py files carrying cell magics (%pip, %run)
+          # that are not valid Python. Ruff cannot parse them, so they yield syntax
+          # errors instead of findings — 18 of them in one repo, drowning the real
+          # results. Exclude them, but NAME each one: a file that is silently not
+          # analysed is precisely the green-having-scanned-nothing failure this
+          # workflow exists to prevent.
+          exclude=()
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            # The marker is written by Databricks itself and is always line 1.
+            [ "$(head -n1 "$f")" = "# Databricks notebook source" ] || continue
+            echo "::warning file=$f::Databricks notebook source — not valid Python, excluded from SAST"
+            exclude+=(--exclude "$f")
+          done < <(git ls-files -- '*.py')
           # --select S applies the bandit ruleset WITHOUT touching the repo's own config,
           # so enabling this cannot change or break a repo's existing lint.
           # Only S101 (assert) is ignored under tests/ — asserts there are the point.
-          # NOT --exclude 'tests/**', which would drop every S rule (shell=True,
+          # NOT --exclude '**/tests/**', which would drop every S rule (shell=True,
           # hardcoded secrets, unsafe deserialization) from test code as well.
-          ruff check --select S --extend-per-file-ignores 'tests/**:S101' \
-            --output-format concise . \
+          # The leading **/ is load-bearing: a bare 'tests/**' anchors at the repo root
+          # and misses backend/tests/, which is where most of these repos keep them.
+          ruff check --select S --extend-per-file-ignores '**/tests/**:S101' \
+            "${exclude[@]}" --output-format concise . \
             || { echo "::error::ruff security rules found issues"; exit 1; }
 
   report:
