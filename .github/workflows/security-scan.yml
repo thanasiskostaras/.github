@@ -220,14 +220,24 @@ jobs:
           # audit <report> <label> -- <pip-audit args...>
           audit() {
             local out="$1" label="$2"; shift 3
-            # No --strict. Verified: with it, one unresolvable dependency aborts the
-            # run and writes NO report, so the entire rest of the tree goes unaudited
-            # — the opposite of what strictness is for. Without it the report is
-            # written and the skipped package is recorded as `skip_reason`, which the
-            # gate below treats as a failure unless the caller has declared it.
+            local prc=0
+            # `set -e` + `pipefail` kills the whole STEP the moment this pipeline exits
+            # non-zero — which is every run that finds anything. Everything below was
+            # therefore dead code exactly when it mattered: no ::error:: naming the
+            # package, no fix-availability gate, no allow-unaudited check, just a bare
+            # "Process completed with exit code 1". Run the pipeline with -e off and
+            # read the status deliberately.
+            #
+            # No --strict either. Verified: with it, one unresolvable dependency aborts
+            # the run and writes NO report, so the rest of the tree goes unaudited —
+            # the opposite of what strictness is for. Without it the report is written
+            # and the skipped package is recorded as `skip_reason`, which the gate
+            # below treats as a failure unless the caller has declared it.
+            set +e
             pip-audit --progress-spinner off -f json -o "$out" "$@" 2>&1 \
               | tee "$RUNNER_TEMP/audit.log" | tail -30
-            local prc="${PIPESTATUS[0]}"
+            prc="${PIPESTATUS[0]}"
+            set -e
             # pip-audit surfaces an unauthenticated private clone as a raw pip traceback
             # ("could not read Username for 'https://github.com'"), which reads like a
             # tool bug. Name the actual cause and the actual fix.
