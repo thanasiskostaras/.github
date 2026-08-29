@@ -128,7 +128,9 @@ jobs:
           for f in $(git ls-files -- '*pyproject.toml'); do
             d=$(dirname "$f"); scanned=$((scanned+1))
             echo "::group::pip-audit (project) $d"
-            pip-audit --progress-spinner off --strict -f json -o "pip-audit-$(slug "$d").json" -P "$d" 2>&1 | tail -30 || rc=1
+            # Project path is POSITIONAL. -P/--path means "restrict to this
+            # installation path" (for --local) and is rejected outright here.
+            pip-audit --progress-spinner off --strict -f json -o "pip-audit-$(slug "$d").json" "$d" 2>&1 | tail -30 || rc=1
             echo "::endgroup::"
           done
           # requirements*.txt counted as a Python signal in detect but matched no loop here,
@@ -153,9 +155,13 @@ jobs:
         run: |
           set -euo pipefail
           rc=0; scanned=0
+          slug() { printf '%s' "${1:-root}" | tr '/.' '--' | sed 's/^-*//; s/-*$//; s/^$/root/'; }
           for f in $(git ls-files -- '*package-lock.json'); do
             d=$(dirname "$f"); scanned=$((scanned+1))
             echo "::group::npm audit $d"
+            # Capture JSON for the artifact as well as the readable log; without this
+            # the failure artifact holds only pip-audit output even on an npm failure.
+            ( cd "$d" && npm audit --json > "$GITHUB_WORKSPACE/npm-audit-$(slug "$d").json" || true )
             ( cd "$d" && npm audit --audit-level=high ) || rc=1
             echo "::endgroup::"
           done
@@ -173,7 +179,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dependency-findings
-          path: pip-audit-*.json
+          path: |
+            pip-audit-*.json
+            npm-audit-*.json
           if-no-files-found: ignore
 
   sast:
@@ -190,8 +198,11 @@ jobs:
           python -m pip install --quiet 'ruff==0.14.5'
           # --select S applies the bandit ruleset WITHOUT touching the repo's own config,
           # so enabling this cannot change or break a repo's existing lint.
-          # S101 (assert) is excluded in tests only — asserts there are the point.
-          ruff check --select S --exclude 'tests/**' --output-format concise . \
+          # Only S101 (assert) is ignored under tests/ — asserts there are the point.
+          # NOT --exclude 'tests/**', which would drop every S rule (shell=True,
+          # hardcoded secrets, unsafe deserialization) from test code as well.
+          ruff check --select S --extend-per-file-ignores 'tests/**:S101' \
+            --output-format concise . \
             || { echo "::error::ruff security rules found issues"; exit 1; }
 
   report:
