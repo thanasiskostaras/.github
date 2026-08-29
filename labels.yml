@@ -91,3 +91,8 @@ labels:
   - name: status:needs-review
     color: 0e8a16
     description: Awaiting review or approval
+
+  # ── Security ──
+  - name: security
+    color: b60205
+    description: Security finding — secret, vulnerable dependency, or SAST hit

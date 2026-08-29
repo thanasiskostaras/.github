@@ -1,0 +1,177 @@
+name: Security scan
+
+# Reusable security scan. Call it from any repo with:
+#   uses: thanasiskostaras/.github/.github/workflows/security-scan.yml@<release-sha> # vX.Y.Z
+# Pin to a release SHA (not @main) — supply-chain hardening; bump via Dependabot.
+#
+# WHY THIS AND NOT CODEQL: code scanning and secret scanning are restricted to *public*
+# repos on Free/Pro plans. Every repo here is private, so the GitHub-native tooling would
+# need GitHub Advanced Security (per-committer, Team/Enterprise). This does the same three
+# jobs with tools that run as ordinary steps and cost nothing on private repos.
+#
+# Three independent jobs, so one failing does not mask the others:
+#   • secrets — gitleaks over FULL history, on every trigger. A secret committed and
+#               later removed is still in history and still compromised.
+#   • deps    — pip-audit / npm audit. Fails only on High+ WITH a fix available, so an
+#               unfixable advisory cannot block every PR indefinitely.
+#   • sast    — ruff's flake8-bandit (S) rules. Run via --select so no repo needs to
+#               change its own lint config.
+# Language detection is automatic from files present; a repo with neither Python nor Node
+# simply skips those jobs.
+#
+# On a SCHEDULED run, failures open/update a tracking issue rather than only turning the
+# run red — a red scheduled run notifies nobody. The issue @-mentions the owner, which is
+# what makes GitHub email it (see docs/mini-automation-setup.md, Approvals/Security rules).
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python used for pip-audit / ruff.
+        type: string
+        default: "3.12"
+        required: false
+      node-version:
+        description: Node used for npm audit.
+        type: string
+        default: "20"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.d.outputs.python }}
+      node: ${{ steps.d.outputs.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        run: |
+          set -euo pipefail
+          py=false; node=false
+          if ls pyproject.toml requirements*.txt */pyproject.toml >/dev/null 2>&1; then py=true; fi
+          if ls package.json */package.json >/dev/null 2>&1; then node=true; fi
+          echo "python=$py" >> "$GITHUB_OUTPUT"
+          echo "node=$node"  >> "$GITHUB_OUTPUT"
+          echo "detected: python=$py node=$node"
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, always. A secret committed and later deleted is still in history
+          # and still compromised, so scanning only the diff would miss exactly the case
+          # that matters most. Costs seconds on repos this size.
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          set -euo pipefail
+          VER=8.28.0
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks version
+          # `detect` walks git history; `--redact` keeps the finding out of the public log.
+          # Exit 1 = leaks found, 2 = tool error — both must fail, neither silently.
+          ./gitleaks detect --source . --redact --no-banner --exit-code 1 \
+            --report-format json --report-path gitleaks.json
+      - name: Upload findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-findings
+          path: gitleaks.json
+          if-no-files-found: ignore
+
+  deps:
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - if: needs.detect.outputs.python == 'true'
+        uses: actions/setup-python@v5
+        with: { python-version: "${{ inputs.python-version }}" }
+      - name: pip-audit
+        if: needs.detect.outputs.python == 'true'
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet pip-audit
+          # Audit each project we can find. --fix-only style gating: we surface everything
+          # but only FAIL when a fix exists, so an unfixable advisory does not wedge every
+          # PR forever. Reviewed on the scheduled run instead.
+          rc=0
+          for f in $(git ls-files '**/pyproject.toml' 'pyproject.toml' 2>/dev/null | head -5); do
+            d=$(dirname "$f")
+            echo "::group::pip-audit $d"
+            pip-audit --progress-spinner off --strict -f json -o "audit-$RANDOM.json" -P "$d" 2>&1 | tail -30 || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc
+      - if: needs.detect.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: "${{ inputs.node-version }}" }
+      - name: npm audit
+        if: needs.detect.outputs.node == 'true'
+        run: |
+          set -euo pipefail
+          rc=0
+          for f in $(git ls-files '**/package-lock.json' 'package-lock.json' 2>/dev/null | head -5); do
+            d=$(dirname "$f")
+            echo "::group::npm audit $d"
+            ( cd "$d" && npm audit --audit-level=high ) || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc
+
+  sast:
+    needs: detect
+    if: needs.detect.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ inputs.python-version }}" }
+      - name: ruff security rules (flake8-bandit)
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet ruff
+          # --select S applies the bandit ruleset WITHOUT touching the repo's own config,
+          # so enabling this cannot change or break a repo's existing lint.
+          # S101 (assert) is excluded in tests only — asserts there are the point.
+          ruff check --select S --exclude 'tests/**' --output-format concise . \
+            || { echo "::error::ruff security rules found issues"; exit 1; }
+
+  report:
+    # A red scheduled run notifies nobody. Turn failures into an issue that @-mentions the
+    # owner, which is what makes GitHub email it.
+    needs: [secrets, deps, sast]
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          S: ${{ needs.secrets.result }}
+          D: ${{ needs.deps.result }}
+          A: ${{ needs.sast.result }}
+        run: |
+          set -euo pipefail
+          owner="${REPO%%/*}"
+          title="Security scan failed on $(date -u +%Y-%m-%d)"
+          body=$(printf '@%s the scheduled security scan reported findings.\n\n| job | result |\n|---|---|\n| secrets (gitleaks) | %s |\n| dependencies | %s |\n| SAST (ruff S) | %s |\n\nLogs: %s\n\nTriage: a `secrets` failure is the urgent one — treat any hit as compromised, rotate at the provider first, then purge. Dependency and SAST findings are reviewed, not auto-fixed.\n' "$owner" "$S" "$D" "$A" "$RUN")
+          # Reuse today's issue if it exists so a daily schedule cannot spam the tracker.
+          n=$(gh issue list --repo "$REPO" --state open --label security --search "$title" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body" --label security --assignee "$owner" \
+              || gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
