@@ -166,7 +166,14 @@ jobs:
           # or `git remote -v` output, so the token cannot leak into an artifact.
           git config --global url."https://x-access-token:${REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: pip-audit
+        id: pip
         if: needs.detect.outputs.python == 'true'
+        # The header promises "one failing does not mask the others", but that only held
+        # BETWEEN jobs. Inside this one, a failing pip-audit step skipped npm audit
+        # entirely, so a repo with an unresolvable Python dependency had its whole Node
+        # surface silently unaudited. Both steps now always run; the gate below fails the
+        # job if either did.
+        continue-on-error: true
         env:
           ALLOW_UNAUDITED: ${{ inputs.allow-unaudited }}
         run: |
@@ -278,7 +285,9 @@ jobs:
         uses: actions/setup-node@v4
         with: { node-version: "${{ inputs.node-version }}" }
       - name: npm audit
+        id: npm
         if: needs.detect.outputs.node == 'true'
+        continue-on-error: true
         run: |
           set -euo pipefail
           rc=0; scanned=0
@@ -326,6 +335,25 @@ jobs:
           done
           [ "$scanned" -gt 0 ] || { echo "::error::node detected but no npm lockfile audited"; exit 1; }
           echo "npm audit: $scanned lockfile(s) audited"
+          exit $rc
+      - name: Fail if either audit failed
+        # continue-on-error keeps a failing step from ending the job, so the failure has
+        # to be re-raised here or the job would go green on a red audit — precisely the
+        # silence this workflow exists to prevent. `outcome` is the step's real result
+        # ('failure' even when continue-on-error swallowed it); a skipped step is
+        # 'skipped', not 'failure', so a repo with only one language is unaffected.
+        if: always()
+        env:
+          PIP: ${{ steps.pip.outcome }}
+          NPM: ${{ steps.npm.outcome }}
+        run: |
+          set -euo pipefail
+          rc=0
+          [ "${PIP:-skipped}" != "failure" ] || { echo "::error::pip-audit reported findings (see the step above)"; rc=1; }
+          [ "${NPM:-skipped}" != "failure" ] || { echo "::error::npm audit reported findings (see the step above)"; rc=1; }
+          if [ "$rc" -eq 0 ]; then
+            echo "dependency audits: pip=${PIP:-skipped} npm=${NPM:-skipped}"
+          fi
           exit $rc
       - name: Upload dependency findings
         if: failure()
