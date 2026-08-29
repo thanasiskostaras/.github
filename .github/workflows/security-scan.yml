@@ -22,6 +22,14 @@ name: Security scan
 # On a SCHEDULED run, failures open/update a tracking issue rather than only turning the
 # run red — a red scheduled run notifies nobody. The issue @-mentions the owner, which is
 # what makes GitHub email it (see docs/mini-automation-setup.md, Approvals/Security rules).
+#
+# CALLERS MUST GRANT `issues: write`. A reusable workflow cannot exceed the permissions the
+# calling workflow was given, so without it the tracking-issue step fails 403 and a
+# scheduled failure goes unreported — the exact silence this job exists to prevent:
+#   jobs:
+#     security:
+#       uses: thanasiskostaras/.github/.github/workflows/security-scan.yml@<sha>
+#       permissions: { contents: read, issues: write }
 
 on:
   workflow_call:
@@ -71,8 +79,16 @@ jobs:
         run: |
           set -euo pipefail
           VER=8.28.0
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
-            | tar -xz gitleaks
+          BASE="https://github.com/gitleaks/gitleaks/releases/download/v${VER}"
+          TARBALL="gitleaks_${VER}_linux_x64.tar.gz"
+          curl -sSfLO "$BASE/$TARBALL"
+          curl -sSfLO "$BASE/gitleaks_${VER}_checksums.txt"
+          # Verify BEFORE extracting or executing. This workflow preaches supply-chain
+          # hardening (pinned caller SHAs); fetching and running an unverified third-party
+          # binary with full repo access would contradict exactly that. Fails closed — if
+          # the checksums file is absent or the digest differs, the step stops here.
+          grep " ${TARBALL}\$" "gitleaks_${VER}_checksums.txt" | sha256sum -c -
+          tar -xzf "$TARBALL" gitleaks
           ./gitleaks version
           # `detect` walks git history; `--redact` keeps the finding out of the public log.
           # Exit 1 = leaks found, 2 = tool error — both must fail, neither silently.
@@ -98,15 +114,17 @@ jobs:
         if: needs.detect.outputs.python == 'true'
         run: |
           set -euo pipefail
-          python -m pip install --quiet pip-audit
+          # Pinned for reproducible results, consistent with gitleaks above.
+          python -m pip install --quiet 'pip-audit==2.9.0'
           # Audit each project we can find. --fix-only style gating: we surface everything
           # but only FAIL when a fix exists, so an unfixable advisory does not wedge every
           # PR forever. Reviewed on the scheduled run instead.
           rc=0
-          for f in $(git ls-files '**/pyproject.toml' 'pyproject.toml' 2>/dev/null | head -5); do
+          # No cap: silently skipping projects is the opposite of what a security scan is for.
+          for f in $(git ls-files '**/pyproject.toml' 'pyproject.toml' 2>/dev/null); do
             d=$(dirname "$f")
             echo "::group::pip-audit $d"
-            pip-audit --progress-spinner off --strict -f json -o "audit-$RANDOM.json" -P "$d" 2>&1 | tail -30 || rc=1
+            pip-audit --progress-spinner off --strict -f json -o "pip-audit-$(echo "$d" | tr '/' '-').json" -P "$d" 2>&1 | tail -30 || rc=1
             echo "::endgroup::"
           done
           exit $rc
@@ -118,13 +136,20 @@ jobs:
         run: |
           set -euo pipefail
           rc=0
-          for f in $(git ls-files '**/package-lock.json' 'package-lock.json' 2>/dev/null | head -5); do
+          for f in $(git ls-files '**/package-lock.json' 'package-lock.json' 2>/dev/null); do
             d=$(dirname "$f")
             echo "::group::npm audit $d"
             ( cd "$d" && npm audit --audit-level=high ) || rc=1
             echo "::endgroup::"
           done
           exit $rc
+      - name: Upload dependency findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-findings
+          path: pip-audit-*.json
+          if-no-files-found: ignore
 
   sast:
     needs: detect
@@ -137,7 +162,7 @@ jobs:
       - name: ruff security rules (flake8-bandit)
         run: |
           set -euo pipefail
-          python -m pip install --quiet ruff
+          python -m pip install --quiet 'ruff==0.14.5'
           # --select S applies the bandit ruleset WITHOUT touching the repo's own config,
           # so enabling this cannot change or break a repo's existing lint.
           # S101 (assert) is excluded in tests only — asserts there are the point.
