@@ -1,0 +1,25 @@
+name: Security scan
+# Calls the shared scan in thanasiskostaras/.github. Pinned to a SHA (the tag is
+# a moving target) with the release noted alongside it.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    # Daily. Staggered across repos so they do not all queue at the same minute.
+    - cron: "27 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # PRs coalesce per PR; scheduled and manual runs coalesce per ref.
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    uses: thanasiskostaras/.github/.github/workflows/security-scan.yml@9037c04e62ef0f9df8e4bdd4a24c8bf06633080c # v1.8.1
+    permissions:
+      contents: read
+      # Required. A reusable workflow cannot exceed the caller's permissions, so
+      # without this the scheduled-failure tracking issue fails 403 and a red
+      # scheduled run notifies nobody.
+      issues: write
