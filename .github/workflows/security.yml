@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   security:
-    uses: thanasiskostaras/.github/.github/workflows/security-scan.yml@1495147ff7e862bae16dec8fac74fb8a6b6bd5ed # v1.8.0
+    uses: thanasiskostaras/.github/.github/workflows/security-scan.yml@9037c04e62ef0f9df8e4bdd4a24c8bf06633080c # v1.8.1
     permissions:
       contents: read
       # Required. A reusable workflow cannot exceed the caller's permissions, so
