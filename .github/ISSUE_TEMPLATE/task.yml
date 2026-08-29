@@ -1,5 +1,5 @@
 name: Task
-description: A small, concrete unit of work — ready to hand to the autonomous-run mini
+description: A small, concrete unit of work — scoped tightly enough to hand straight to a build
 title: "[Task]: "
 labels: ["mini-queue"]
 body:
@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         Keep it **small and concrete** — one focused outcome (roughly a day or less).
-        Every acceptance criterion must be checkable by a command or test, so a human
-        *or* the mini can verify "done" objectively. A well-formed task *is* the spec.
+        Every acceptance criterion must be checkable by a command or test, so "done" can
+        be verified objectively rather than argued about. A well-formed task *is* the spec.
   - type: textarea
     id: goal
     attributes:
